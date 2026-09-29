@@ -1,17 +1,17 @@
 model:
   vocab_size: null
-  block_size: 256
-  n_layer: 6
-  n_head: 6
-  n_embd: 384
+  block_size: 32
+  n_layer: 4
+  n_head: 4
+  n_embd: 128
   dropout: 0.0
 
 training:
-  batch_size: 32
+  batch_size: 8
   learning_rate: 0.0003
-  max_steps: 5000
-  eval_interval: 250
-  eval_steps: 50
+  max_steps: 500
+  eval_interval: 100
+  eval_steps: 20
   weight_decay: 0.1
   grad_clip: 1.0
   train_split: 0.9
