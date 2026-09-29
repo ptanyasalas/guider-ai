@@ -1,0 +1,30 @@
+model:
+  vocab_size: null
+  block_size: 256
+  n_layer: 6
+  n_head: 6
+  n_embd: 384
+  dropout: 0.0
+
+training:
+  batch_size: 32
+  learning_rate: 0.0003
+  max_steps: 5000
+  eval_interval: 250
+  eval_steps: 50
+  weight_decay: 0.1
+  grad_clip: 1.0
+  train_split: 0.9
+  seed: 42
+
+data:
+  path: data/train.txt
+
+checkpoint:
+  dir: checkpoints
+  filename: guider.pt
+
+generation:
+  max_new_tokens: 300
+  temperature: 0.8
+  top_k: 50
