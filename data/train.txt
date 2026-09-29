@@ -1,0 +1,6 @@
+Guider is an experimental language model built from scratch.
+This small starter corpus exists only to verify that the training pipeline works.
+Replace this file with a much larger text corpus before doing meaningful training.
+
+The model learns to predict the next character from the characters that came before it.
+A language model becomes useful through data, scale, training, evaluation, and careful iteration.
