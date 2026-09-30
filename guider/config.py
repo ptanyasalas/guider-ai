@@ -1,31 +1,22 @@
-from dataclasses import dataclass
 from pathlib import Path
+
 import yaml
 
 
-@dataclass
-class ModelConfig:
-    vocab_size: int | None
-    block_size: int
-    n_layer: int
-    n_head: int
-    n_embd: int
-    dropout: float
+_REQUIRED_SECTIONS = (
+    "model", "tokenizer", "training", "early_stopping",
+    "data", "checkpoint", "generation",
+)
 
 
-@dataclass
-class TrainingConfig:
-    batch_size: int
-    learning_rate: float
-    max_steps: int
-    eval_interval: int
-    eval_steps: int
-    weight_decay: float
-    grad_clip: float
-    train_split: float
-    seed: int
-
-
-def load_config(path: str = "config.yaml"):
-    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
+def load_config(path: str = "config.yaml") -> dict:
+    config_path = Path(path)
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
+    raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise ValueError("config.yaml must contain a top-level mapping.")
+    missing = [key for key in _REQUIRED_SECTIONS if key not in raw]
+    if missing:
+        raise ValueError(f"Missing config sections: {', '.join(missing)}")
     return raw
