@@ -1,51 +1,96 @@
+run_name: "Guider 0.4a"
+
 model:
   vocab_size: null
-  block_size: 256
-  n_layer: 6
+  block_size: 512
+  n_layer: 10
   n_head: 6
-  n_embd: 192
-  dropout: 0.15
+  n_embd: 384
+  n_ffn: 1024
+  dropout: 0.05
+  rope_theta: 10000.0
+  rms_norm_eps: 0.00001
 
 tokenizer:
-  vocab_size: 2048
+  vocab_size: 8192
   min_pair_frequency: 2
-  sample_chars: 10000000
+  sample_chars: 25000000
   eos_token: "<|endoftext|>"
+  copy_from: null
 
 training:
-  batch_size: 32
+  batch_size: 8
+  grad_accum_steps: 8
+  eval_batch_size: 8
   learning_rate: 0.0003
   min_learning_rate: 0.00003
-  warmup_steps: 200
-  max_steps: 8000
-  eval_interval: 100
-  eval_steps: 10
+  warmup_steps: 500
+  max_steps: 20000
+  eval_interval: 250
+  eval_steps: 20
   weight_decay: 0.1
   grad_clip: 1.0
   seed: 42
   amp: true
   compile: false
+  init_from: null
 
 early_stopping:
   enabled: true
-  patience: 8
-  min_delta: 0.001
+  patience: 12
+  min_delta: 0.0002
 
 data:
-  local_dir: data
+  local_dir: data/guider_0_4a
   persistent_dir: null
   train_file: train.bin
   val_file: val.bin
   tokenizer_file: tokenizer.json
-  max_train_tokens: 500000000
-  max_val_tokens: 10000000
-  preprocess_batch_size: 2048
+  max_train_tokens: 2000000000
+  max_val_tokens: 30000000
+  preprocess_batch_size: 1024
+  tokenizer_sources:
+    - name: HuggingFaceFW/fineweb-edu
+      config: default
+      split: train
+      text_field: text
+      weight: 0.95
+      shuffle_buffer: 10000
+    - name: roneneldan/TinyStories
+      split: train
+      text_field: text
+      weight: 0.05
+      shuffle_buffer: 10000
+  train_sources:
+    - name: HuggingFaceFW/fineweb-edu
+      config: default
+      split: train
+      text_field: text
+      weight: 0.97
+      shuffle_buffer: 10000
+    - name: roneneldan/TinyStories
+      split: train
+      text_field: text
+      weight: 0.03
+      shuffle_buffer: 10000
+  val_sources:
+    - name: HuggingFaceFW/fineweb-edu
+      config: default
+      split: train
+      text_field: text
+      weight: 0.8
+      skip_examples: 1000000
+    - name: roneneldan/TinyStories
+      split: validation
+      text_field: text
+      weight: 0.2
+      shuffle_buffer: 1000
 
 checkpoint:
-  local_dir: checkpoints
+  local_dir: checkpoints/guider_0_4a
   drive_dir: null
-  filename: guider_latest.pt
-  best_filename: guider_best.pt
+  filename: guider_0_4a_latest.pt
+  best_filename: guider_0_4a_best.pt
   save_interval: 250
   resume: true
 
@@ -53,3 +98,5 @@ generation:
   max_new_tokens: 300
   temperature: 0.8
   top_k: 50
+  top_p: 0.95
+  repetition_penalty: 1.05
