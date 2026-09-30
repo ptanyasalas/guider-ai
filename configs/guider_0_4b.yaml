@@ -1,0 +1,99 @@
+run_name: "Guider 0.4b"
+
+model:
+  vocab_size: null
+  block_size: 512
+  n_layer: 10
+  n_head: 6
+  n_embd: 384
+  n_ffn: 1024
+  dropout: 0.05
+  rope_theta: 10000.0
+  rms_norm_eps: 0.00001
+
+tokenizer:
+  vocab_size: 8192
+  min_pair_frequency: 2
+  sample_chars: 1000000
+  eos_token: "<|endoftext|>"
+  copy_from: data/guider_0_4a/tokenizer.json
+
+training:
+  batch_size: 4
+  grad_accum_steps: 8
+  eval_batch_size: 4
+  learning_rate: 0.00001
+  min_learning_rate: 0.000001
+  warmup_steps: 200
+  max_steps: 8000
+  eval_interval: 200
+  eval_steps: 20
+  weight_decay: 0.05
+  grad_clip: 1.0
+  seed: 43
+  amp: true
+  compile: false
+  init_from: checkpoints/guider_0_4a/guider_0_4a_best.pt
+
+early_stopping:
+  enabled: true
+  patience: 10
+  min_delta: 0.0002
+
+data:
+  local_dir: data/guider_0_4b
+  persistent_dir: null
+  train_file: train.bin
+  val_file: val.bin
+  tokenizer_file: tokenizer.json
+  max_train_tokens: 300000000
+  max_val_tokens: 10000000
+  preprocess_batch_size: 512
+  tokenizer_sources:
+    - name: HuggingFaceTB/smoltalk
+      split: train
+      message_field: messages
+      weight: 1.0
+      shuffle_buffer: 5000
+  train_sources:
+    - name: HuggingFaceTB/smoltalk
+      split: train
+      message_field: messages
+      weight: 0.85
+      shuffle_buffer: 5000
+    - name: roneneldan/TinyStories
+      split: train
+      text_field: text
+      weight: 0.05
+      shuffle_buffer: 5000
+    - name: HuggingFaceFW/fineweb-edu
+      config: default
+      split: train
+      text_field: text
+      weight: 0.10
+      shuffle_buffer: 10000
+  val_sources:
+    - name: HuggingFaceTB/smoltalk
+      split: test
+      message_field: messages
+      weight: 0.9
+    - name: roneneldan/TinyStories
+      split: validation
+      text_field: text
+      weight: 0.1
+      shuffle_buffer: 1000
+
+checkpoint:
+  local_dir: checkpoints/guider_0_4b
+  drive_dir: null
+  filename: guider_0_4b_latest.pt
+  best_filename: guider_0_4b_best.pt
+  save_interval: 200
+  resume: true
+
+generation:
+  max_new_tokens: 256
+  temperature: 0.7
+  top_k: 50
+  top_p: 0.9
+  repetition_penalty: 1.08
