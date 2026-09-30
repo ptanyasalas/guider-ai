@@ -8,88 +8,86 @@ from .model import GuiderLM
 from .tokenizer import ByteBPETokenizer
 
 
-def resolve_checkpoint(cfg, requested=None):
+def resolve_checkpoint(cfg, requested="auto"):
     drive_value = cfg["checkpoint"].get("drive_dir")
     drive_dir = Path(drive_value) if drive_value else None
     local_dir = Path(cfg["checkpoint"]["local_dir"])
-
     candidates = {
-        "best": [
-            *( [drive_dir / cfg["checkpoint"]["best_filename"]] if drive_dir is not None else [] ),
-            local_dir / cfg["checkpoint"]["best_filename"],
-        ],
-        "latest": [
-            *( [drive_dir / cfg["checkpoint"]["filename"]] if drive_dir is not None else [] ),
-            local_dir / cfg["checkpoint"]["filename"],
-        ],
+        "best": ([drive_dir / cfg["checkpoint"]["best_filename"]] if drive_dir else [])
+                + [local_dir / cfg["checkpoint"]["best_filename"]],
+        "latest": ([drive_dir / cfg["checkpoint"]["filename"]] if drive_dir else [])
+                  + [local_dir / cfg["checkpoint"]["filename"]],
     }
+    if requested not in {"auto", "best", "latest"}:
+        path = Path(requested)
+        if path.exists():
+            return path
+        raise FileNotFoundError(f"Checkpoint not found: {path}")
+    search = candidates["best"] + candidates["latest"] if requested == "auto" else candidates[requested]
+    for path in search:
+        if path.exists():
+            return path
+    raise FileNotFoundError("No checkpoint found for this config.")
 
-    if requested and requested not in {"auto", "best", "latest"}:
-        candidate = Path(requested)
-        if candidate.exists():
-            return candidate
-        raise FileNotFoundError(f"Checkpoint not found: {candidate}")
 
-    if requested == "best":
-        search = candidates["best"]
-    elif requested == "latest":
-        search = candidates["latest"]
-    else:
-        search = candidates["best"] + candidates["latest"]
-
-    for candidate in search:
-        if candidate.exists():
-            return candidate
-
-    raise FileNotFoundError("No checkpoint found. Run python -m guider.train first.")
+def trim_at_eos(ids, eos_id):
+    try:
+        return ids[:ids.index(int(eos_id)) + 1]
+    except ValueError:
+        return ids
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate text with a Guider checkpoint.")
-    parser.add_argument(
-        "--checkpoint",
-        default="auto",
-        help="auto, best, latest, or a direct checkpoint path",
-    )
+    parser = argparse.ArgumentParser(description="Generate with Guider 0.4.")
+    parser.add_argument("--config", default="config.yaml")
+    parser.add_argument("--checkpoint", default="auto", help="auto, best, latest, or checkpoint path")
+    parser.add_argument("--prompt", default=None)
     args = parser.parse_args()
 
-    cfg = load_config()
-    checkpoint_path = resolve_checkpoint(cfg, args.checkpoint)
+    cfg = load_config(args.config)
+    path = resolve_checkpoint(cfg, args.checkpoint)
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    checkpoint = torch.load(path, map_location=device, weights_only=False)
+
+    if checkpoint.get("architecture") != GuiderLM.ARCHITECTURE:
+        raise ValueError("This is not a Guider 0.4 checkpoint. Use Guider 0.3 code for 0.3 weights.")
+
     tokenizer = ByteBPETokenizer.from_dict(checkpoint["tokenizer"])
-    mc = checkpoint["config"]["model"]
-    model = GuiderLM(
-        tokenizer.vocab_size, mc["block_size"], mc["n_layer"],
-        mc["n_head"], mc["n_embd"], mc["dropout"],
-    ).to(device)
+    model = GuiderLM.from_config(tokenizer.vocab_size, checkpoint["config"]["model"]).to(device)
     model.load_state_dict(checkpoint["model_state"])
     model.eval()
 
-    step = checkpoint.get("step", "?")
-    best_val = checkpoint.get("best_val")
-    print("Guider v0.3 | byte-level BPE")
-    print(f"Checkpoint: {checkpoint_path} | step={step}")
-    if best_val is not None:
-        print(f"Best validation loss stored: {best_val:.4f}")
-    print("Type a prompt. Ctrl+C to exit.\n")
+    gc = checkpoint["config"]["generation"]
+    eos_id = tokenizer.eos_token_id
+    print(f"{checkpoint['config'].get('run_name', 'Guider')} | step={checkpoint.get('step', '?')}")
+    print(f"Checkpoint: {path}")
+    if checkpoint.get("best_val") is not None:
+        print(f"Best validation loss: {checkpoint['best_val']:.4f}")
 
+    single_prompt = args.prompt
     while True:
-        prompt = input("> ").strip()
+        prompt = single_prompt if single_prompt is not None else input("> ").strip()
         if not prompt:
-            print("Please enter a non-empty prompt.\n")
+            print("Please enter a non-empty prompt.")
+            if single_prompt is not None:
+                return
             continue
         ids = tokenizer.encode(prompt)
         x = torch.tensor([ids], dtype=torch.long, device=device)
         with torch.inference_mode():
             generated = model.generate(
                 x,
-                max_new_tokens=checkpoint["config"]["generation"]["max_new_tokens"],
-                temperature=checkpoint["config"]["generation"]["temperature"],
-                top_k=checkpoint["config"]["generation"]["top_k"],
+                max_new_tokens=int(gc["max_new_tokens"]),
+                temperature=float(gc["temperature"]),
+                top_k=gc.get("top_k"),
+                top_p=float(gc.get("top_p", 1.0)),
+                repetition_penalty=float(gc.get("repetition_penalty", 1.0)),
+                eos_token_id=eos_id,
             )
-        print(tokenizer.decode(generated[0].tolist()))
+        print(tokenizer.decode(trim_at_eos(generated[0].tolist(), eos_id)))
         print()
+        if single_prompt is not None:
+            return
 
 
 if __name__ == "__main__":
