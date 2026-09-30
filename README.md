@@ -103,3 +103,17 @@ After a runtime reset, re-upload the checkpoint and rerun preprocessing to recre
 ## Evaluation plan
 
 Use the same fixed prompts and decoding settings to compare Guider 0.3 Best, 0.3 Latest, 0.4a Best and 0.4b Best. Track validation loss separately from human evaluation of coherence, instruction following, repetition and EOS stopping. Lower validation loss alone does not guarantee better answers.
+
+
+## Fixed-prompt evaluation across versions
+
+The evaluation script supports both saved Guider 0.3 checkpoints and new Guider 0.4 checkpoints. It runs the same prompts from `eval_prompts.json` and writes a Markdown report.
+
+~~~python
+!python avaluar.py --checkpoint checkpoints/guider_best.pt --label "Guider 0.3 Best" --output eval_03_best.md
+!python avaluar.py --checkpoint checkpoints/guider_latest.pt --label "Guider 0.3 Latest" --output eval_03_latest.md
+!python avaluar.py --checkpoint checkpoints/guider_0_4a/guider_0_4a_best.pt --label "Guider 0.4a Best" --output eval_04a.md
+!python avaluar.py --checkpoint checkpoints/guider_0_4b/guider_0_4b_best.pt --label "Guider 0.4b Best" --output eval_04b.md
+~~~
+
+Compare coherence, instruction following, repetition and EOS stopping. This is a qualitative fixed-prompt comparison, not a benchmark score. Lower validation loss alone does not guarantee better answers.
