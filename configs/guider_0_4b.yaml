@@ -50,13 +50,13 @@ data:
   max_val_tokens: 10000000
   preprocess_batch_size: 512
   tokenizer_sources:
-    - name: HuggingFaceTB/smoltalk
-      split: train
+    - name: HuggingFaceH4/ultrachat_200k
+      split: train_sft
       message_field: messages
       weight: 1.0
       shuffle_buffer: 5000
   train_sources:
-    - name: HuggingFaceTB/smoltalk
+    - name: HuggingFaceH4/ultrachat_200k
       split: train
       message_field: messages
       weight: 0.85
@@ -73,8 +73,8 @@ data:
       weight: 0.10
       shuffle_buffer: 10000
   val_sources:
-    - name: HuggingFaceTB/smoltalk
-      split: test
+    - name: HuggingFaceH4/ultrachat_200k
+      split: test_sft
       message_field: messages
       weight: 0.9
     - name: roneneldan/TinyStories
