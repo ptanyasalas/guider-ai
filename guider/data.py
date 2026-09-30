@@ -37,11 +37,10 @@ def open_memmap(path):
 
 
 def get_batch(data, batch_size, block_size, device, rng, pin_memory=True):
-    if data.size <= block_size:
+    if data.size <= block_size + 1:
         raise ValueError(f"Not enough tokens for block_size={block_size}: {data.size}")
     starts = rng.integers(0, data.size - block_size, size=batch_size, dtype=np.int64)
     offsets = np.arange(block_size + 1, dtype=np.int64)
-    # Read only sampled windows from disk; don't copy the complete dataset into RAM.
     batch = np.asarray(data[starts[:, None] + offsets], dtype=np.int64)
     tokens = torch.from_numpy(batch)
     if pin_memory and device.type == "cuda":
