@@ -1,72 +1,105 @@
-# Guider AI v0.3
+# Guider AI
 
-Guider is an experimental decoder-only Transformer language model. It can train in Google Colab on a GPU **without mounting Google Drive**.
+Guider is an experimental decoder-only Transformer language model designed for Google Colab T4 experiments without requiring Google Drive.
 
-## Google Colab quick start (no Drive)
+## Guider 0.4 milestones
 
-1. Open a new Colab notebook and choose **Runtime > Change runtime type > T4 GPU**, if available.
-2. Check the GPU:
+### 0.4a — larger-corpus pretraining
+- 10-layer, 384-wide Transformer; 512-token context and 8,192-token BPE vocabulary.
+- RoPE, RMSNorm and SwiGLU blocks.
+- Streaming mixture dominated by HuggingFaceFW/fineweb-edu with a small TinyStories replay component.
+- Gradient accumulation, FP16 AMP, deterministic validation sampling, gradient clipping and periodic atomic checkpoints.
 
-    ```python
-    !nvidia-smi
-    ```
+### 0.4b — instruction tuning
+- Same architecture and exact tokenizer as 0.4a.
+- Starts from the 0.4a best checkpoint.
+- Uses SmolTalk-style conversations with small TinyStories and FineWeb-Edu replay components.
+- Lower learning rate intended to adapt the model without replacing all its previous language-model training.
 
-3. Clone the repository and install dependencies:
+### Generation fix
+Guider 0.4 generation now stops as soon as EOS is sampled, preventing the next unrelated story from being appended. Top-k, top-p and repetition-penalty sampling controls are configurable.
 
-    ```python
-    !git clone https://github.com/ptanyasalas/guider-ai.git
-    %cd guider-ai
-    !pip install -r requirements.txt
-    ```
+Guider 0.4 is a new architecture and **is not compatible with Guider 0.3 checkpoint weights**. Keep your 0.3 Best and Latest files for comparison.
 
-4. Preprocess TinyStories (this downloads/streams the dataset and may take a while):
+## Google Colab setup
 
-    ```python
-    !python preprocesar.py
-    ```
+Choose a T4 GPU runtime if available:
 
-5. Start training:
+```python
+!nvidia-smi
+!git clone https://github.com/ptanyasalas/guider-ai.git
+%cd guider-ai
+!pip install -r requirements.txt
+```
 
-    ```python
-    !python -m guider.train
-    ```
+## Run Guider 0.4a
 
-6. Generate text after training:
+Preprocess a large streaming corpus mixture (this can take a long time and creates large local files):
 
-    ```python
-    !python -m guider.generate
-    ```
+```python
+!python preprocesar.py --config configs/guider_0_4a.yaml
+```
 
-## Important: Colab storage without Drive
+Train:
 
-Data and checkpoints are saved in the Colab runtime's local disk. **They are temporary** and can disappear when the runtime disconnects or resets. If you want to keep a trained checkpoint, download it before ending the session:
+```python
+!python -m guider.train --config configs/guider_0_4a.yaml
+```
 
-    ```python
-    from google.colab import files
-    files.download("checkpoints/guider_best.pt")
-    ```
+Generate from the best checkpoint:
 
-If that file does not exist yet, try `checkpoints/guider_latest.pt`. To resume training in the same live runtime, rerun `!python -m guider.train`; the latest local checkpoint is resumed automatically. After a runtime reset, upload your saved checkpoint into the `checkpoints/` folder before restarting training. The processed data files must also be recreated after a reset by rerunning `!python preprocesar.py`.
+```python
+!python -m guider.generate --config configs/guider_0_4a.yaml --checkpoint best --prompt "Once upon a time"
+```
 
-## Changes in v0.3
+## Run Guider 0.4b
 
-- Fast byte-level BPE using the Rust-backed tokenizers library.
-- One-time preprocessing to uint16 binary files: `data/train.bin` and `data/val.bin`.
-- Memory-mapped data access with numpy.memmap.
-- CUDA training with FP16 automatic mixed precision (AMP).
-- Fused AdamW when supported and optimized causal attention.
-- Warmup plus cosine learning-rate decay.
-- Dropout, weight decay, validation checks, and early stopping.
-- Local checkpoints that work without Google Drive; Drive persistence is optional.
+Run this after 0.4a has produced its best checkpoint. First prepare the conversation corpus:
 
-## Dataset and storage
+```python
+!python preprocesar.py --config configs/guider_0_4b.yaml
+```
 
-The preprocessor streams the `roneneldan/TinyStories` dataset from Hugging Face. It trains the tokenizer on a sample from the training split only, then creates `train.bin` and `val.bin` using uint16 token IDs. The default caps are 500,000,000 training tokens and 10,000,000 validation tokens. A 500-million-token uint16 file is about 1 GB before filesystem overhead.
+Then train from the 0.4a weights:
 
-Tokenized files and checkpoints are intentionally not committed to Git.
+```python
+!python -m guider.train --config configs/guider_0_4b.yaml
+```
 
-## Important notes
+Generate:
 
-No setting can guarantee zero overfitting. Dropout, weight decay, validation loss monitoring, and early stopping reduce the risk and help stop when validation performance stops improving.
+```python
+!python -m guider.generate --config configs/guider_0_4b.yaml --checkpoint best --prompt "Explain why the sky looks blue."
+```
 
-The v0.2 tokenizer/checkpoints are not compatible with the v0.3 tokenizer. Run preprocessing to create a matching tokenizer and binary data files before training.
+## Dataset scale and realistic expectations
+
+- 0.4a is capped at 2 billion training tokens and 30 million validation tokens.
+- 0.4b is capped at 300 million training tokens and 10 million validation tokens.
+- The source corpus is much larger than TinyStories, but the caps are the maximum preprocessed token counts, not a promise that Colab will finish training on all of them.
+- A T4 session may time out. Checkpoints are saved periodically; download them before the runtime ends.
+- Streaming avoids downloading the full original dataset archive, but preprocessing still writes large token files to the runtime disk.
+
+The FineWeb-Edu and SmolTalk datasets are hosted on Hugging Face. Review their dataset cards, licenses, and terms before using or redistributing derived data.
+
+## Checkpoints and temporary storage
+
+Colab local storage is temporary. Download the 0.4a best checkpoint:
+
+```python
+from google.colab import files
+files.download("checkpoints/guider_0_4a/guider_0_4a_best.pt")
+```
+
+For 0.4b:
+
+```python
+from google.colab import files
+files.download("checkpoints/guider_0_4b/guider_0_4b_best.pt")
+```
+
+After a runtime reset, re-upload the checkpoint and rerun preprocessing to recreate the matching token files. Do not mix data/tokenizer files between the 0.4a and 0.4b folders.
+
+## Evaluation plan
+
+Use the same fixed prompts and decoding settings to compare Guider 0.3 Best, 0.3 Latest, 0.4a Best and 0.4b Best. Track validation loss separately from human evaluation of coherence, instruction following, repetition and EOS stopping. Lower validation loss alone does not guarantee better answers.
