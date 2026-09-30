@@ -185,6 +185,7 @@ def main():
         return
 
     started = time.perf_counter()
+    completed_step = start_step
     step = start_step
     for step in range(start_step, cfg["training"]["max_steps"]):
         if step % cfg["training"]["eval_interval"] == 0:
@@ -214,13 +215,12 @@ def main():
         scaler.step(optimizer)
         scaler.update()
 
-        completed = step + 1
-        if completed % cfg["checkpoint"]["save_interval"] == 0:
-            atomic_save(make_checkpoint(model, optimizer, scaler, completed, best_val, wait_count, cfg, tokenizer, train_rng, val_rng), latest_path)
+        completed_step = step + 1
+        if completed_step % cfg["checkpoint"]["save_interval"] == 0:
+            atomic_save(make_checkpoint(model, optimizer, scaler, completed_step, best_val, wait_count, cfg, tokenizer, train_rng, val_rng), latest_path)
             print(f"Checkpoint saved: {latest_path}")
 
-    completed = min(cfg["training"]["max_steps"], step + 1)
-    atomic_save(make_checkpoint(model, optimizer, scaler, completed, best_val, wait_count, cfg, tokenizer, train_rng, val_rng), latest_path)
+    atomic_save(make_checkpoint(model, optimizer, scaler, completed_step, best_val, wait_count, cfg, tokenizer, train_rng, val_rng), latest_path)
     print(f"Training finished. Latest: {latest_path}; best: {best_path}")
 
 
