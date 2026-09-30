@@ -1,93 +1,59 @@
-# Guider AI
+# Guider AI v0.3
 
-Guider is an experimental language model built from scratch with AI-assisted development.
+Guider is an experimental decoder-only Transformer language model. This version is designed for larger text datasets and GPU training in Google Colab.
 
-The first milestone is intentionally small: a character-level decoder-only Transformer that can be trained locally from a plain text file and used from a CLI.
+## Changes in v0.3
 
-## Requirements
+- Fast byte-level BPE using the Rust-backed tokenizers library.
+- One-time preprocessing to uint16 binary files: data/train.bin and data/val.bin.
+- Memory-mapped data access with numpy.memmap; the full token dataset is not loaded into RAM.
+- CUDA training with FP16 automatic mixed precision (AMP).
+- Fused AdamW when supported, optimized causal attention, and optional torch.compile.
+- Warmup plus cosine learning-rate decay.
+- Dropout, weight decay, validation checks, and early stopping.
+- Periodic Google Drive checkpoints, including optimizer and AMP scaler state, so training can resume.
 
-- Python 3.10+
-- PyTorch
-- A CPU works for the first tests; a CUDA GPU is strongly recommended for larger runs.
+## Google Colab quick start
 
-## Quick start
+1. Open a new Colab notebook.
+2. Choose Runtime > Change runtime type > T4 GPU if that option is available.
+3. Run the following cell to verify the assigned GPU:
 
-### 1. Create an environment
+    !nvidia-smi
 
-```bash
-python -m venv .venv
-source .venv/bin/activate
-```
+4. Clone the repository and install dependencies:
 
-Windows PowerShell:
+    !git clone https://github.com/ptanyasalas/guider-ai.git
+    %cd guider-ai
+    !pip install -r requirements.txt
 
-```powershell
-.venv\\Scripts\\Activate.ps1
-```
+5. Mount Google Drive:
 
-### 2. Install dependencies
+    from google.colab import drive
+    drive.mount('/content/drive')
 
-```bash
-pip install -r requirements.txt
-```
+6. Preprocess TinyStories once:
 
-### 3. Add training data
+    !python preprocesar.py
 
-Put plain text in:
+7. Start training:
 
-```
-data/train.txt
-```
+    !python -m guider.train
 
-For the first experiment, a few MB is enough to verify the pipeline. This first implementation uses a character-level tokenizer, so the training text should contain the languages and characters you want the model to learn.
+8. Generate text from the best/latest available checkpoint:
 
-### 4. Train
+    !python -m guider.generate
 
-```bash
-python -m guider.train
-```
+The default config uses /content/drive/MyDrive/Guider/data and /content/drive/MyDrive/Guider/checkpoints. If the runtime disconnects, reconnect, mount Drive again, clone/install if needed, and rerun the training command. The latest checkpoint resumes automatically.
 
-Checkpoints are written to `checkpoints/`.
+## Dataset and storage
 
-### 5. Generate text
+The preprocessor streams the roneneldan/TinyStories dataset from Hugging Face. It trains the tokenizer on a sample from the training split only, then creates train.bin and val.bin using uint16 token IDs. The default caps are 500,000,000 training tokens and 10,000,000 validation tokens. A 500-million-token uint16 file is about 1 GB before filesystem overhead.
 
-```bash
-python -m guider.generate
-```
+Tokenized files and checkpoints are intentionally not committed to Git.
 
-## Project structure
+## Important notes
 
-```
-guider-ai/
-├── data/
-│   └── train.txt
-├── guider/
-│   ├── __init__.py
-│   ├── config.py
-│   ├── model.py
-│   ├── data.py
-│   ├── train.py
-│   └── generate.py
-├── checkpoints/
-├── config.yaml
-├── requirements.txt
-└── README.md
-```
+No setting can guarantee zero overfitting. Dropout, weight decay, validation loss monitoring, and early stopping reduce the risk and help stop when validation performance stops improving.
 
-## Current scope
-
-This is deliberately **not** a production LLM yet.
-
-The first milestone is:
-
-1. Load text.
-2. Build a character vocabulary.
-3. Train a decoder-only Transformer with next-token prediction.
-4. Save a checkpoint.
-5. Generate text from the checkpoint.
-
-Later milestones can replace the character tokenizer with BPE, scale the model, improve the dataset, add instruction tuning, and build the Guider CLI/application.
-
-## Important
-
-Do not judge model quality from the tiny starter dataset. The purpose of v0.1 is to prove that the complete training -> checkpoint -> generation pipeline works end to end.
+The v0.2 tokenizer/checkpoints are not compatible with the v0.3 tokenizer. Run preprocessing to create a matching tokenizer and binary data files before training.
