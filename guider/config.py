@@ -19,4 +19,5 @@ def load_config(path: str = "config.yaml") -> dict:
     missing = [key for key in _REQUIRED_SECTIONS if key not in raw]
     if missing:
         raise ValueError(f"Missing config sections: {', '.join(missing)}")
+    raw["_config_path"] = str(config_path)
     return raw
