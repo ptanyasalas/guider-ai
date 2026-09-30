@@ -32,7 +32,7 @@ def resolve_checkpoint(cfg, requested="auto"):
 
 def trim_at_eos(ids, eos_id):
     try:
-        return ids[:ids.index(int(eos_id)) + 1]
+        return ids[:ids.index(int(eos_id))]
     except ValueError:
         return ids
 
