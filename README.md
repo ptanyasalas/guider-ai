@@ -13,7 +13,7 @@ Guider is an experimental decoder-only Transformer language model designed for G
 ### 0.4b — instruction tuning
 - Same architecture and exact tokenizer as 0.4a.
 - Starts from the 0.4a best checkpoint.
-- Uses SmolTalk-style conversations with small TinyStories and FineWeb-Edu replay components.
+- Uses UltraChat conversations with small TinyStories and FineWeb-Edu replay components.
 - Lower learning rate intended to adapt the model without replacing all its previous language-model training.
 
 ### Generation fix
@@ -80,7 +80,7 @@ Generate:
 - A T4 session may time out. Checkpoints are saved periodically; download them before the runtime ends.
 - Streaming avoids downloading the full original dataset archive, but preprocessing still writes large token files to the runtime disk.
 
-The FineWeb-Edu and SmolTalk datasets are hosted on Hugging Face. Review their dataset cards, licenses, and terms before using or redistributing derived data.
+The FineWeb-Edu and UltraChat datasets are hosted on Hugging Face. Review their dataset cards, licenses, and terms before using or redistributing derived data.
 
 ## Checkpoints and temporary storage
 
