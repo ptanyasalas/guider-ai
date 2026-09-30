@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import argparse
 import contextlib
 import math
 import os
@@ -11,7 +12,7 @@ import numpy as np
 import torch
 
 from .config import load_config
-from .data import get_batch, open_memmap, prepare_data
+from .data import get_batch, open_memmap
 from .model import GuiderLM
 from .tokenizer import ByteBPETokenizer
 
@@ -24,57 +25,41 @@ def set_seed(seed):
         torch.cuda.manual_seed_all(seed)
 
 
-def set_learning_rate(optimizer, step, cfg):
+def amp_context(enabled):
+    return torch.autocast(device_type="cuda", dtype=torch.float16) if enabled else contextlib.nullcontext()
+
+
+def learning_rate(optimizer, step, cfg):
     tc = cfg["training"]
-    if tc["warmup_steps"] > 0 and step < tc["warmup_steps"]:
+    if tc["warmup_steps"] and step < tc["warmup_steps"]:
         lr = tc["learning_rate"] * (step + 1) / tc["warmup_steps"]
     else:
-        progress = min(1.0, max(0.0, (step - tc["warmup_steps"]) /
-                                max(1, tc["max_steps"] - tc["warmup_steps"])))
-        cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+        progress = min(1.0, max(0.0, (step - tc["warmup_steps"]) / max(1, tc["max_steps"] - tc["warmup_steps"])))
+        cosine = 0.5 * (1 + math.cos(math.pi * progress))
         lr = tc["min_learning_rate"] + (tc["learning_rate"] - tc["min_learning_rate"]) * cosine
     for group in optimizer.param_groups:
         group["lr"] = lr
     return lr
 
 
-def amp_context(enabled):
-    return torch.autocast(device_type="cuda", dtype=torch.float16) if enabled else contextlib.nullcontext()
-
-
-def estimate_loss(model, train_data, val_data, cfg, device, train_rng, val_rng, amp_enabled):
-    model.eval()
-    result = {}
-    tc, block_size = cfg["training"], cfg["model"]["block_size"]
-    with torch.no_grad():
-        for name, data, rng in (("train", train_data, train_rng), ("val", val_data, val_rng)):
-            losses = []
-            for _ in range(tc["eval_steps"]):
-                x, y = get_batch(data, tc["batch_size"], block_size, device, rng)
-                with amp_context(amp_enabled):
-                    _, loss = model(x, y)
-                losses.append(loss.item())
-            result[name] = float(np.mean(losses))
-    model.train()
-    return result
-
-
-def atomic_save(state, path):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temporary = path.with_suffix(path.suffix + ".tmp")
-    torch.save(state, temporary)
-    os.replace(temporary, path)
-
-
 def raw_model(model):
     return getattr(model, "_orig_mod", model)
 
 
-def make_checkpoint(model, optimizer, scaler, step, best_val, wait_count, cfg, tokenizer, train_rng, val_rng):
+def atomic_save(state, path):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    torch.save(state, tmp)
+    os.replace(tmp, path)
+
+
+def checkpoint_state(model, optimizer, scaler, step, best_val, wait, cfg, tokenizer, rng):
     state = {
+        "format_version": 2,
+        "architecture": raw_model(model).ARCHITECTURE,
         "step": step,
         "best_val": best_val,
-        "wait_count": wait_count,
+        "wait_count": wait,
         "model_state": raw_model(model).state_dict(),
         "optimizer_state": optimizer.state_dict(),
         "scaler_state": scaler.state_dict(),
@@ -83,22 +68,34 @@ def make_checkpoint(model, optimizer, scaler, step, best_val, wait_count, cfg, t
         "python_rng_state": random.getstate(),
         "numpy_rng_state": np.random.get_state(),
         "torch_rng_state": torch.get_rng_state(),
-        "train_rng_state": train_rng.bit_generator.state,
-        "val_rng_state": val_rng.bit_generator.state,
+        "train_rng_state": rng.bit_generator.state,
     }
     if torch.cuda.is_available():
         state["cuda_rng_state"] = torch.cuda.get_rng_state_all()
     return state
 
 
-def load_checkpoint(path, model, optimizer, scaler, device, train_rng, val_rng):
+def load_initial(path, model, tokenizer):
     state = torch.load(path, map_location="cpu", weights_only=False)
+    if state.get("architecture") != raw_model(model).ARCHITECTURE:
+        raise ValueError("Initial checkpoint architecture does not match this Guider version.")
+    old_tok = ByteBPETokenizer.from_dict(state["tokenizer"])
+    if old_tok.to_dict()["tokenizer_json"] != tokenizer.to_dict()["tokenizer_json"]:
+        raise ValueError("Initial checkpoint tokenizer differs from current tokenizer.")
+    model.load_state_dict(state["model_state"])
+    print(f"Initialized weights from {path}; source step={state.get('step')}")
+
+
+def restore_resume(path, model, optimizer, scaler, device, rng):
+    state = torch.load(path, map_location=device, weights_only=False)
+    if state.get("architecture") != raw_model(model).ARCHITECTURE:
+        raise ValueError("Resume checkpoint architecture mismatch.")
     model.load_state_dict(state["model_state"])
     optimizer.load_state_dict(state["optimizer_state"])
-    for opt_state in optimizer.state.values():
-        for key, value in opt_state.items():
+    for opt in optimizer.state.values():
+        for key, value in opt.items():
             if torch.is_tensor(value):
-                opt_state[key] = value.to(device)
+                opt[key] = value.to(device)
     if state.get("scaler_state"):
         scaler.load_state_dict(state["scaler_state"])
     random.setstate(state["python_rng_state"])
@@ -107,122 +104,123 @@ def load_checkpoint(path, model, optimizer, scaler, device, train_rng, val_rng):
     if device.type == "cuda" and state.get("cuda_rng_state") is not None:
         torch.cuda.set_rng_state_all(state["cuda_rng_state"])
     if state.get("train_rng_state"):
-        train_rng.bit_generator.state = state["train_rng_state"]
-    if state.get("val_rng_state"):
-        val_rng.bit_generator.state = state["val_rng_state"]
+        rng.bit_generator.state = state["train_rng_state"]
     return int(state.get("step", 0)), float(state.get("best_val", float("inf"))), int(state.get("wait_count", 0))
 
 
-def checkpoint_directory(cfg):
-    drive_dir = cfg["checkpoint"].get("drive_dir")
-    drive_root = Path("/content/drive/MyDrive")
-    if drive_dir and drive_root.exists():
-        return Path(drive_dir)
-    local = Path(cfg["checkpoint"]["local_dir"])
-    print(f"Using local checkpoints (Google Drive is optional): {local}")
-    return local
+def evaluate(model, train_data, val_data, cfg, device, amp_enabled, step):
+    model.eval()
+    tc = cfg["training"]
+    result = {}
+    seed = int(tc["seed"]) + 100000 + step * 17
+    with torch.no_grad():
+        for name, data, offset in (("train", train_data, 1), ("val", val_data, 2)):
+            rng = np.random.default_rng(seed + offset)
+            losses = []
+            for _ in range(int(tc["eval_steps"])):
+                x, y = get_batch(data, int(tc.get("eval_batch_size", tc["batch_size"])), cfg["model"]["block_size"], device, rng)
+                with amp_context(amp_enabled):
+                    _, loss = model(x, y)
+                losses.append(float(loss.item()))
+            result[name] = float(np.mean(losses))
+    model.train()
+    return result
 
 
 def main():
-    cfg = load_config()
-    set_seed(cfg["training"]["seed"])
+    parser = argparse.ArgumentParser(description="Train Guider 0.4.")
+    parser.add_argument("--config", default="config.yaml")
+    args = parser.parse_args()
+    cfg = load_config(args.config)
+    set_seed(int(cfg["training"]["seed"]))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    amp_enabled = device.type == "cuda" and cfg["training"]["amp"]
-
+    amp_enabled = device.type == "cuda" and bool(cfg["training"]["amp"])
     if device.type == "cuda":
         torch.set_float32_matmul_precision("high")
 
     dc = cfg["data"]
     local_dir = Path(dc["local_dir"])
-    persistent_dir = Path(dc["persistent_dir"]) if dc.get("persistent_dir") else None
-    prepare_data(local_dir, persistent_dir, [dc["train_file"], dc["val_file"], dc["tokenizer_file"]])
     tokenizer = ByteBPETokenizer.from_file(local_dir / dc["tokenizer_file"], cfg["tokenizer"]["eos_token"])
-    if tokenizer.vocab_size > np.iinfo(np.uint16).max + 1:
-        raise ValueError("Tokenizer vocabulary does not fit in uint16.")
-
     train_data = open_memmap(local_dir / dc["train_file"])
     val_data = open_memmap(local_dir / dc["val_file"])
-    mc = cfg["model"]
-    model = GuiderLM(tokenizer.vocab_size, mc["block_size"], mc["n_layer"], mc["n_head"], mc["n_embd"], mc["dropout"]).to(device)
+    model = GuiderLM.from_config(tokenizer.vocab_size, cfg["model"]).to(device)
+
     try:
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=cfg["training"]["learning_rate"],
-            weight_decay=cfg["training"]["weight_decay"], fused=(device.type == "cuda"),
-        )
+        optimizer = torch.optim.AdamW(model.parameters(), lr=cfg["training"]["learning_rate"], weight_decay=cfg["training"]["weight_decay"], fused=device.type == "cuda")
     except TypeError:
-        optimizer = torch.optim.AdamW(
-            model.parameters(), lr=cfg["training"]["learning_rate"],
-            weight_decay=cfg["training"]["weight_decay"],
-        )
+        optimizer = torch.optim.AdamW(model.parameters(), lr=cfg["training"]["learning_rate"], weight_decay=cfg["training"]["weight_decay"])
     scaler = torch.amp.GradScaler("cuda", enabled=amp_enabled)
+    rng = np.random.default_rng(int(cfg["training"]["seed"]) + 1)
+    ckpt_cfg = cfg["checkpoint"]
+    ckpt_dir = Path(ckpt_cfg["local_dir"])
+    latest = ckpt_dir / ckpt_cfg["filename"]
+    best = ckpt_dir / ckpt_cfg["best_filename"]
 
-    train_rng = np.random.default_rng(cfg["training"]["seed"] + 1)
-    val_rng = np.random.default_rng(cfg["training"]["seed"] + 2)
-    ckpt_dir = checkpoint_directory(cfg)
-    latest_path = ckpt_dir / cfg["checkpoint"]["filename"]
-    best_path = ckpt_dir / cfg["checkpoint"]["best_filename"]
-    start_step, best_val, wait_count = 0, float("inf"), 0
+    if cfg["training"].get("init_from"):
+        init_path = Path(cfg["training"]["init_from"])
+        if not init_path.exists():
+            raise FileNotFoundError(f"training.init_from not found: {init_path}")
+        load_initial(init_path, model, tokenizer)
 
-    if cfg["checkpoint"]["resume"] and latest_path.exists():
-        print(f"Resuming from {latest_path}")
-        start_step, best_val, wait_count = load_checkpoint(
-            latest_path, model, optimizer, scaler, device, train_rng, val_rng
-        )
+    start, best_val, wait = 0, float("inf"), 0
+    if ckpt_cfg.get("resume", True) and latest.exists():
+        start, best_val, wait = restore_resume(latest, model, optimizer, scaler, device, rng)
+        print(f"Resumed {latest} at step {start}")
 
-    if device.type == "cuda" and cfg["training"]["compile"]:
+    if device.type == "cuda" and cfg["training"].get("compile", False):
         try:
             model = torch.compile(model)
-            print("torch.compile enabled (first step may take longer).")
         except Exception as exc:
-            print(f"torch.compile unavailable; continuing without it: {exc}")
+            print(f"torch.compile disabled after error: {exc}")
 
     params = sum(p.numel() for p in raw_model(model).parameters())
-    print(
-        f"Guider v0.3 | device={device} | AMP={amp_enabled} | vocab={tokenizer.vocab_size:,} | "
-        f"train={train_data.size:,} tokens | val={val_data.size:,} tokens | params={params:,}"
-    )
-    if start_step >= cfg["training"]["max_steps"]:
-        print("Checkpoint has already reached max_steps.")
+    accum = int(cfg["training"].get("grad_accum_steps", 1))
+    print(f"{cfg.get('run_name', 'Guider')} | device={device} AMP={amp_enabled} vocab={tokenizer.vocab_size:,} params={params:,} effective_batch={cfg['training']['batch_size'] * accum:,}")
+    print(f"Train tokens={train_data.size:,}; validation tokens={val_data.size:,}")
+    if start >= cfg["training"]["max_steps"]:
+        print("Checkpoint already reached max_steps.")
         return
 
-    started = time.perf_counter()
-    completed_step = start_step
-    step = start_step
-    for step in range(start_step, cfg["training"]["max_steps"]):
-        if step % cfg["training"]["eval_interval"] == 0:
-            losses = estimate_loss(model, train_data, val_data, cfg, device, train_rng, val_rng, amp_enabled)
-            print(
-                f"step {step:>6} | train {losses['train']:.4f} | val {losses['val']:.4f} | "
-                f"elapsed {(time.perf_counter() - started) / 60:.1f} min"
-            )
-            if losses["val"] < best_val - cfg["early_stopping"]["min_delta"]:
-                best_val, wait_count = losses["val"], 0
-                atomic_save(make_checkpoint(model, optimizer, scaler, step, best_val, wait_count, cfg, tokenizer, train_rng, val_rng), best_path)
-                print(f"New best checkpoint: {best_path}")
+    model.train()
+    optimizer.zero_grad(set_to_none=True)
+    completed = start
+    began = time.perf_counter()
+    for step in range(start, int(cfg["training"]["max_steps"])):
+        if step % int(cfg["training"]["eval_interval"]) == 0:
+            losses = evaluate(model, train_data, val_data, cfg, device, amp_enabled, step)
+            print(f"step {step:>6} | train {losses['train']:.4f} | val {losses['val']:.4f} | {(time.perf_counter()-began)/60:.1f} min")
+            if losses["val"] < best_val - float(cfg["early_stopping"]["min_delta"]):
+                best_val, wait = losses["val"], 0
+                atomic_save(checkpoint_state(model, optimizer, scaler, step, best_val, wait, cfg, tokenizer, rng), best)
+                print(f"New best: {best}")
             else:
-                wait_count += 1
-            if cfg["early_stopping"]["enabled"] and wait_count >= cfg["early_stopping"]["patience"]:
-                print("Early stopping: validation loss has stopped improving.")
+                wait += 1
+            if cfg["early_stopping"]["enabled"] and wait >= int(cfg["early_stopping"]["patience"]):
+                print("Early stopping: validation loss stopped improving.")
                 break
 
-        set_learning_rate(optimizer, step, cfg)
-        optimizer.zero_grad(set_to_none=True)
-        x, y = get_batch(train_data, cfg["training"]["batch_size"], mc["block_size"], device, train_rng)
-        with amp_context(amp_enabled):
-            _, loss = model(x, y)
-        scaler.scale(loss).backward()
+        learning_rate(optimizer, step, cfg)
+        for _ in range(accum):
+            x, y = get_batch(train_data, int(cfg["training"]["batch_size"]), cfg["model"]["block_size"], device, rng)
+            with amp_context(amp_enabled):
+                _, loss = model(x, y)
+                loss = loss / accum
+            if not torch.isfinite(loss):
+                raise FloatingPointError(f"Non-finite loss at step {step}: {loss.item()}")
+            scaler.scale(loss).backward()
         scaler.unscale_(optimizer)
-        torch.nn.utils.clip_grad_norm_(raw_model(model).parameters(), cfg["training"]["grad_clip"])
+        torch.nn.utils.clip_grad_norm_(raw_model(model).parameters(), float(cfg["training"]["grad_clip"]))
         scaler.step(optimizer)
         scaler.update()
+        optimizer.zero_grad(set_to_none=True)
+        completed = step + 1
 
-        completed_step = step + 1
-        if completed_step % cfg["checkpoint"]["save_interval"] == 0:
-            atomic_save(make_checkpoint(model, optimizer, scaler, completed_step, best_val, wait_count, cfg, tokenizer, train_rng, val_rng), latest_path)
-            print(f"Checkpoint saved: {latest_path}")
+        if completed % int(ckpt_cfg["save_interval"]) == 0:
+            atomic_save(checkpoint_state(model, optimizer, scaler, completed, best_val, wait, cfg, tokenizer, rng), latest)
+            print(f"Saved {latest}")
 
-    atomic_save(make_checkpoint(model, optimizer, scaler, completed_step, best_val, wait_count, cfg, tokenizer, train_rng, val_rng), latest_path)
-    print(f"Training finished. Latest: {latest_path}; best: {best_path}")
+    atomic_save(checkpoint_state(model, optimizer, scaler, completed, best_val, wait, cfg, tokenizer, rng), latest)
+    print(f"Training stopped at step {completed}; latest={latest}; best={best}")
 
 
 if __name__ == "__main__":
