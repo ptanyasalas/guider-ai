@@ -114,11 +114,12 @@ def load_checkpoint(path, model, optimizer, scaler, device, train_rng, val_rng):
 
 
 def checkpoint_directory(cfg):
+    drive_dir = cfg["checkpoint"].get("drive_dir")
     drive_root = Path("/content/drive/MyDrive")
-    if drive_root.exists():
-        return Path(cfg["checkpoint"]["drive_dir"])
+    if drive_dir and drive_root.exists():
+        return Path(drive_dir)
     local = Path(cfg["checkpoint"]["local_dir"])
-    print(f"Drive is not mounted; checkpoints will be local: {local}")
+    print(f"Using local checkpoints (Google Drive is optional): {local}")
     return local
 
 
