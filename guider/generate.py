@@ -8,14 +8,16 @@ from .tokenizer import ByteBPETokenizer
 
 
 def resolve_checkpoint(cfg):
-    drive_dir = Path(cfg["checkpoint"]["drive_dir"])
+    drive_value = cfg["checkpoint"].get("drive_dir")
+    drive_dir = Path(drive_value) if drive_value else None
     local_dir = Path(cfg["checkpoint"]["local_dir"])
-    candidates = [
-        drive_dir / cfg["checkpoint"]["best_filename"],
-        local_dir / cfg["checkpoint"]["best_filename"],
-        drive_dir / cfg["checkpoint"]["filename"],
-        local_dir / cfg["checkpoint"]["filename"],
-    ]
+    candidates = []
+    if drive_dir is not None:
+        candidates.append(drive_dir / cfg["checkpoint"]["best_filename"])
+    candidates.append(local_dir / cfg["checkpoint"]["best_filename"])
+    if drive_dir is not None:
+        candidates.append(drive_dir / cfg["checkpoint"]["filename"])
+    candidates.append(local_dir / cfg["checkpoint"]["filename"])
     for candidate in candidates:
         if candidate.exists():
             return candidate
