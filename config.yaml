@@ -1,32 +1,53 @@
 model:
   vocab_size: null
-  block_size: 64
+  block_size: 256
   n_layer: 6
   n_head: 6
   n_embd: 192
-  dropout: 0.1
+  dropout: 0.15
 
 tokenizer:
   vocab_size: 2048
   min_pair_frequency: 2
+  sample_chars: 10000000
+  eos_token: "<|endoftext|>"
 
 training:
-  batch_size: 16
+  batch_size: 256
   learning_rate: 0.0003
-  max_steps: 5000
+  min_learning_rate: 0.00003
+  warmup_steps: 200
+  max_steps: 8000
   eval_interval: 100
-  eval_steps: 20
+  eval_steps: 10
   weight_decay: 0.1
   grad_clip: 1.0
-  train_split: 0.9
   seed: 42
+  amp: true
+  compile: true
+
+early_stopping:
+  enabled: true
+  patience: 8
+  min_delta: 0.001
 
 data:
-  path: data/train.txt
+  local_dir: data
+  persistent_dir: /content/drive/MyDrive/Guider/data
+  train_file: train.bin
+  val_file: val.bin
+  tokenizer_file: tokenizer.json
+  max_train_tokens: 500000000
+  max_val_tokens: 10000000
+  preprocess_batch_size: 2048
 
 checkpoint:
-  dir: checkpoints
-  filename: guider.pt
+  local_dir: checkpoints
+  drive_dir: /content/drive/MyDrive/Guider/checkpoints
+  filename: guider_latest.pt
+  best_filename: guider_best.pt
+  save_interval: 250
+  resume: true
 
 generation:
   max_new_tokens: 300
