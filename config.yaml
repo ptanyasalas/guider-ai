@@ -67,6 +67,7 @@ data:
       split: train
       text_field: text
       weight: 0.97
+      skip_examples: 1000000
       shuffle_buffer: 10000
     - name: roneneldan/TinyStories
       split: train
@@ -79,7 +80,6 @@ data:
       split: train
       text_field: text
       weight: 0.8
-      skip_examples: 1000000
     - name: roneneldan/TinyStories
       split: validation
       text_field: text
