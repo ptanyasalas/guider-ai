@@ -33,12 +33,12 @@ class RotaryEmbedding(nn.Module):
         freqs = torch.outer(positions, inv_freq)
         self.register_buffer(
             "cos",
-            freqs.cos().repeat_interleave(2, dim=-1),
+            freqs.cos().repeat(1, 2),
             persistent=False,
         )
         self.register_buffer(
             "sin",
-            freqs.sin().repeat_interleave(2, dim=-1),
+            freqs.sin().repeat(1, 2),
             persistent=False,
         )
 
