@@ -4,5 +4,7 @@ __pycache__/
 .pytest_cache/
 checkpoints/
 wandb/
+data/**/*.bin
+data/**/*.json
 data/*.bin
 data/*.npy
