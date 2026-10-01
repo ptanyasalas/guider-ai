@@ -258,7 +258,8 @@ def main():
                     best_val, wait = losses["val"], 0
                     atomic_save(checkpoint_state(model, optimizer, scaler, step, best_val, wait, cfg, tokenizer, rng), best)
                     print(f"New best: {best}")
-                    log_checkpoint_artifact(run, best, step, "best")
+                    if step == 0 or step % artifact_interval == 0:
+                        log_checkpoint_artifact(run, best, step, "best")
                 else:
                     wait += 1
                 if cfg["early_stopping"]["enabled"] and wait >= int(cfg["early_stopping"]["patience"]):
