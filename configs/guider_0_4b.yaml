@@ -1,4 +1,4 @@
-run_name: "Guider 0.4b"
+run_name: "Guider 0.4.1b"
 
 model:
   vocab_size: null
@@ -16,7 +16,7 @@ tokenizer:
   min_pair_frequency: 2
   sample_chars: 1000000
   eos_token: "<|endoftext|>"
-  copy_from: data/guider_0_4a/tokenizer.json
+  copy_from: data/guider_0_4_1/tokenizer.json
 
 training:
   batch_size: 4
@@ -33,7 +33,7 @@ training:
   seed: 43
   amp: true
   compile: false
-  init_from: checkpoints/guider_0_4a/guider_0_4a_best.pt
+  init_from: checkpoints/guider_0_4_1/guider_0_4_1_best.pt
 
 early_stopping:
   enabled: true
@@ -41,7 +41,7 @@ early_stopping:
   min_delta: 0.0002
 
 data:
-  local_dir: data/guider_0_4b
+  local_dir: data/guider_0_4_1b
   persistent_dir: null
   train_file: train.bin
   val_file: val.bin
@@ -57,7 +57,7 @@ data:
       shuffle_buffer: 5000
   train_sources:
     - name: HuggingFaceH4/ultrachat_200k
-      split: train
+      split: train_sft
       message_field: messages
       weight: 0.85
       shuffle_buffer: 5000
@@ -84,10 +84,10 @@ data:
       shuffle_buffer: 1000
 
 checkpoint:
-  local_dir: checkpoints/guider_0_4b
+  local_dir: checkpoints/guider_0_4_1b
   drive_dir: null
-  filename: guider_0_4b_latest.pt
-  best_filename: guider_0_4b_best.pt
+  filename: guider_0_4_1b_latest.pt
+  best_filename: guider_0_4_1b_best.pt
   save_interval: 200
   resume: true
 
