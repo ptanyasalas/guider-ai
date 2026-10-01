@@ -38,7 +38,7 @@ def trim_at_eos(ids, eos_id):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Generate with Guider 0.4.")
+    parser = argparse.ArgumentParser(description="Generate with Guider 0.4.1.")
     parser.add_argument("--config", default="config.yaml")
     parser.add_argument("--checkpoint", default="auto", help="auto, best, latest, or checkpoint path")
     parser.add_argument("--prompt", default=None)
@@ -50,7 +50,7 @@ def main():
     checkpoint = torch.load(path, map_location=device, weights_only=False)
 
     if checkpoint.get("architecture") != GuiderLM.ARCHITECTURE:
-        raise ValueError("This is not a Guider 0.4 checkpoint. Use Guider 0.3 code for 0.3 weights.")
+        raise ValueError("This checkpoint is not Guider 0.4.1. Use the matching model code for older weights.")
 
     tokenizer = ByteBPETokenizer.from_dict(checkpoint["tokenizer"])
     model = GuiderLM.from_config(tokenizer.vocab_size, checkpoint["config"]["model"]).to(device)
