@@ -1,119 +1,93 @@
 # Guider AI
 
-Guider is an experimental decoder-only Transformer language model designed for Google Colab T4 experiments without requiring Google Drive.
+Guider is an experimental decoder-only Transformer language model designed for Google Colab GPU experiments. Colab's local disk is temporary, so training checkpoints are also uploaded periodically to Weights & Biases (W&B) Artifacts when W&B is configured.
 
-## Guider 0.4 milestones
+## Guider 0.4.1
 
-### 0.4a — larger-corpus pretraining
-- 10-layer, 384-wide Transformer; 512-token context and 8,192-token BPE vocabulary.
+- 10-layer, 384-wide Transformer; 512-token context; byte-level BPE tokenizer.
 - RoPE, RMSNorm and SwiGLU blocks.
-- Streaming mixture dominated by HuggingFaceFW/fineweb-edu with a small TinyStories replay component.
-- Gradient accumulation, FP16 AMP, deterministic validation sampling, gradient clipping and periodic atomic checkpoints.
+- Streaming Hugging Face datasets, with preflight checks before expensive tokenization.
+- Atomic token-file and checkpoint writes, gradient accumulation, FP16 AMP, deterministic validation sampling, gradient clipping, and resume support.
+- W&B logs training/validation loss and learning rate; checkpoint artifacts are uploaded periodically.
 
-### 0.4b — instruction tuning
-- Same architecture and exact tokenizer as 0.4a.
-- Starts from the 0.4a best checkpoint.
-- Uses UltraChat conversations with small TinyStories and FineWeb-Edu replay components.
-- Lower learning rate intended to adapt the model without replacing all its previous language-model training.
+**Compatibility:** Guider 0.4.1 uses a distinct architecture identifier. Guider 0.3 and earlier 0.4 checkpoints are not valid resume/initialization checkpoints for 0.4.1. Keep older files for comparison; do not overwrite them.
 
-### Generation fix
-Guider 0.4 generation now stops as soon as EOS is sampled, preventing the next unrelated story from being appended. Top-k, top-p and repetition-penalty sampling controls are configurable.
+## 1. Colab setup
 
-Guider 0.4 is a new architecture and **is not compatible with Guider 0.3 checkpoint weights**. Keep your 0.3 Best and Latest files for comparison.
-
-## Google Colab setup
-
-Choose a T4 GPU runtime if available:
+Choose a GPU runtime (T4 if available), then run:
 
 ```python
-!nvidia-smi
 !git clone https://github.com/ptanyasalas/guider-ai.git
 %cd guider-ai
 !pip install -r requirements.txt
+!nvidia-smi
 ```
 
-## Run Guider 0.4a
+If you already cloned the repository in this runtime, use `%cd guider-ai` and `!git pull` instead of cloning it again.
 
-Preprocess a large streaming corpus mixture (this can take a long time and creates large local files):
+## 2. Set up W&B
+
+1. Create/sign in to your W&B account and create an API key in your account settings.
+2. In Colab, open the **Secrets** panel (key icon), add a secret named `WANDB_API_KEY`, paste the key there, and enable notebook access to that secret.
+3. Run:
 
 ```python
-!python preprocesar.py --config configs/guider_0_4a.yaml
+from google.colab import userdata
+import os
+
+os.environ["WANDB_API_KEY"] = userdata.get("WANDB_API_KEY")
+os.environ["WANDB_PROJECT"] = "guider-ai"
 ```
 
-Train:
+Do not paste the API key into repository files or share it in notebook output. If you prefer to run without remote tracking, set `os.environ["WANDB_MODE"] = "disabled"` before training.
+
+W&B dashboard: https://wandb.ai/ — choose project `guider-ai`. Training curves appear in the run; checkpoint copies appear under the run's **Artifacts** section.
+
+## 3. Preprocess Guider 0.4.1
+
+The first-run config deliberately uses a smaller token cap so you can verify the full pipeline before spending a long GPU session. It uses the documented `sample-10BT` FineWeb-Edu subset and TinyStories.
 
 ```python
-!python -m guider.train --config configs/guider_0_4a.yaml
+!python preprocesar.py --config configs/guider_0_4_1.yaml
 ```
 
-Generate from the best checkpoint:
+The script now checks each dataset source before doing the main work and writes token files atomically. If it fails, copy the full traceback, including the first error line and the final lines. Do not start training unless preprocessing reports completion.
+
+Local files are written to `data/guider_0_4_1/`. The starter config caps training at 10 million tokens and validation at 500,000 tokens. These are initial test settings, not a claim that the model is fully trained.
+
+## 4. Train
+
+After preprocessing completes:
 
 ```python
-!python -m guider.generate --config configs/guider_0_4a.yaml --checkpoint best --prompt "Once upon a time"
+!python -m guider.train --config configs/guider_0_4_1.yaml
 ```
 
-## Run Guider 0.4b
+The script writes a local recovery checkpoint every 100 steps. It uploads checkpoint artifacts to W&B periodically (every 500 steps by default, and at selected best-checkpoint points). If the Colab runtime resets, the local files may disappear, but completed uploads remain in W&B.
 
-Run this after 0.4a has produced its best checkpoint. First prepare the conversation corpus:
-
-```python
-!python preprocesar.py --config configs/guider_0_4b.yaml
-```
-
-Then train from the 0.4a weights:
-
-```python
-!python -m guider.train --config configs/guider_0_4b.yaml
-```
-
-Generate:
-
-```python
-!python -m guider.generate --config configs/guider_0_4b.yaml --checkpoint best --prompt "Explain why the sky looks blue."
-```
-
-## Dataset scale and realistic expectations
-
-- 0.4a is capped at 2 billion training tokens and 30 million validation tokens.
-- 0.4b is capped at 300 million training tokens and 10 million validation tokens.
-- The source corpus is much larger than TinyStories, but the caps are the maximum preprocessed token counts, not a promise that Colab will finish training on all of them.
-- A T4 session may time out. Checkpoints are saved periodically; download them before the runtime ends.
-- Streaming avoids downloading the full original dataset archive, but preprocessing still writes large token files to the runtime disk.
-
-The FineWeb-Edu and UltraChat datasets are hosted on Hugging Face. Review their dataset cards, licenses, and terms before using or redistributing derived data.
-
-## Checkpoints and temporary storage
-
-Colab local storage is temporary. Download the 0.4a best checkpoint:
+To download a checkpoint to your computer manually from Colab:
 
 ```python
 from google.colab import files
-files.download("checkpoints/guider_0_4a/guider_0_4a_best.pt")
+files.download("checkpoints/guider_0_4_1/guider_0_4_1_best.pt")
 ```
 
-For 0.4b:
+To download a checkpoint stored in W&B later, open the run's **Artifacts** section and download the desired artifact, or use W&B's documented artifact download API. A notebook cannot reliably write directly into a folder on your computer without a browser download action; W&B Artifacts are the automatic off-runtime backup.
+
+## 5. Generate
 
 ```python
-from google.colab import files
-files.download("checkpoints/guider_0_4b/guider_0_4b_best.pt")
+!python -m guider.generate --config configs/guider_0_4_1.yaml --checkpoint best --prompt "Once upon a time"
 ```
 
-After a runtime reset, re-upload the checkpoint and rerun preprocessing to recreate the matching token files. Do not mix data/tokenizer files between the 0.4a and 0.4b folders.
+## Troubleshooting
 
-## Evaluation plan
+- **Dataset loading / split error:** ensure the runtime has internet access, `datasets` installed, and use the exact full traceback to diagnose the source name/config/split.
+- **Missing tokenizer or .bin files:** rerun preprocessing with the same config.
+- **Architecture mismatch:** do not resume an old checkpoint from Guider 0.3 or 0.4a with Guider 0.4.1.
+- **W&B not logging:** verify the Colab Secret is named exactly `WANDB_API_KEY`, notebook access is enabled, and the run has internet access. The training script continues without W&B if initialization fails, printing a warning.
+- **Disk pressure:** token files and checkpoints use Colab's temporary disk; monitor available disk space before increasing token caps.
 
-Use the same fixed prompts and decoding settings to compare Guider 0.3 Best, 0.3 Latest, 0.4a Best and 0.4b Best. Track validation loss separately from human evaluation of coherence, instruction following, repetition and EOS stopping. Lower validation loss alone does not guarantee better answers.
+## Dataset and evaluation notes
 
-
-## Fixed-prompt evaluation across versions
-
-The evaluation script supports both saved Guider 0.3 checkpoints and new Guider 0.4 checkpoints. It runs the same prompts from `eval_prompts.json` and writes a Markdown report.
-
-~~~python
-!python avaluar.py --checkpoint checkpoints/guider_best.pt --label "Guider 0.3 Best" --output eval_03_best.md
-!python avaluar.py --checkpoint checkpoints/guider_latest.pt --label "Guider 0.3 Latest" --output eval_03_latest.md
-!python avaluar.py --checkpoint checkpoints/guider_0_4a/guider_0_4a_best.pt --label "Guider 0.4a Best" --output eval_04a.md
-!python avaluar.py --checkpoint checkpoints/guider_0_4b/guider_0_4b_best.pt --label "Guider 0.4b Best" --output eval_04b.md
-~~~
-
-Compare coherence, instruction following, repetition and EOS stopping. This is a qualitative fixed-prompt comparison, not a benchmark score. Lower validation loss alone does not guarantee better answers.
+Review the dataset cards, licenses and terms for [FineWeb-Edu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) and [TinyStories](https://huggingface.co/datasets/roneneldan/TinyStories) before redistributing derived data. Validation loss is useful for tracking optimization but does not alone measure answer quality.
