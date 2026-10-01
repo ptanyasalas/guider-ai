@@ -23,7 +23,7 @@ def load_model(path, device):
     tokenizer = ByteBPETokenizer.from_dict(checkpoint["tokenizer"])
     if checkpoint.get("architecture") == GuiderLM.ARCHITECTURE:
         model = GuiderLM.from_config(tokenizer.vocab_size, checkpoint["config"]["model"]).to(device)
-        version = checkpoint["config"].get("run_name", "Guider 0.4")
+        version = checkpoint["config"].get("run_name", "Guider 0.4.1")
     else:
         cfg = checkpoint["config"]["model"]
         model = GuiderLMv03(
