@@ -127,7 +127,7 @@ class Block(nn.Module):
 
 
 class GuiderLM(nn.Module):
-    ARCHITECTURE = "guider-transformer-v0.4"
+    ARCHITECTURE = "guider-transformer-v0.4.1"
 
     def __init__(
         self,
